@@ -2,9 +2,10 @@ import logging
 import os
 import sys
 import cv2
+import csv
 import shutil
 import datetime
-from PyQt5.QtWidgets import QApplication,QMainWindow,QFileDialog
+from PyQt5.QtWidgets import QApplication,QMainWindow,QFileDialog,QTableWidgetItem
 from PyQt5.QtCore import pyqtSignal,QTimer,QThread
 from PyQt5 import QtGui
 
@@ -48,14 +49,17 @@ class myMainWindow(ToolkitUi,QMainWindow):
         self.timer = QTimer(self)
         self._init_logger()
         self.slot_init()
-        self.display_size = self.imageLabel.size()
         self.csv_pairs = []
         self.valid_images_format = ['jpg', 'tif', 'png', 'jpeg']
 
     def slot_init(self):
-        self.openImageButton.clicked.connect(self.choose_image)
-        self.openImageDirButton.clicked.connect(self.open_directory)
-        self.LaunchButton.clicked.connect(self.detect)
+        # self.openImageButton.clicked.connect(self.choose_image)
+        # self.openImageDirButton.clicked.connect(self.open_directory)
+        # self.LaunchButton.clicked.connect(self.detect)
+        self.actionImage.triggered.connect(self.choose_image)
+        self.actionDirectory.triggered.connect(self.open_directory)
+        self.menuRun.triggered.connect(self.detect)
+        self.tableWidget.itemSelectionChanged.connect(self.column_selected)
 
     def _init_logger(self):
         self.LOGGER = logging.Logger("Bacteria Toolkit Logger")
@@ -74,7 +78,8 @@ class myMainWindow(ToolkitUi,QMainWindow):
 
     def choose_image(self):
         self.input_image_path,_ = QFileDialog.getOpenFileName(self,"选择图片")
-        self.imgPathText.setText(self.input_image_path)
+        # self.imgPathText.setText(self.input_image_path)
+        self.imagePath = self.input_image_path
         self.LOGGER.info(f"Select {self.input_image_path}")
         try:
             self.input_image = cv2.imread(self.input_image_path)
@@ -89,7 +94,8 @@ class myMainWindow(ToolkitUi,QMainWindow):
     def open_directory(self):
         self.selected_dir = QFileDialog.getExistingDirectory(self)
         try:
-            self.imgPathText.setText(self.selected_dir)
+            # self.imgPathText.setText(self.selected_dir)
+            self.imagePath = self.selected_dir
             self.input_images_path = []
 
             for item in os.listdir(self.selected_dir):
@@ -105,19 +111,23 @@ class myMainWindow(ToolkitUi,QMainWindow):
         self.output_images_path = os.path.join(self.run_path, "images")
         if not os.path.isdir(self.output_images_path):
             os.mkdir(self.output_images_path)
-        path = self.imgPathText.text()
-        if os.path.isdir(path):
-            index = 0
-            for image_path in self.input_images_path:
-                self.current_image_path = image_path
-                img_name = os.path.basename(self.current_image_path)
-                self.current_image_name = ".".join(img_name.split(".")[:-1])
-                self.detect_dish(self.current_image_path)
-                index+=1
-                self._callback(int((index/self.num_of_images)*100))
+        # path = self.imgPathText.text()
+        if not hasattr(self,'imagePath'):
+            self.LOGGER.info("You have not choose valid image")
+        else:
+            path = self.imagePath
+            if os.path.isdir(path):
+                index = 0
+                for image_path in self.input_images_path:
+                    self.current_image_path = image_path
+                    img_name = os.path.basename(self.current_image_path)
+                    self.current_image_name = ".".join(img_name.split(".")[:-1])
+                    self.detect_dish(self.current_image_path)
+                    index+=1
+                    self._callback(int((index/self.num_of_images)*100))
 
-        elif os.path.isfile(path):
-            self.detect_dish(self.current_image_path)
+            elif os.path.isfile(path):
+                self.detect_dish(self.current_image_path)
         # self.detect_bacteria(self.dish_img_path)
 
     def detect_dish(self,img_path,yolo:bool=True):
@@ -151,7 +161,7 @@ class myMainWindow(ToolkitUi,QMainWindow):
     def detect_dish_finished(self,result_list):
         [flag,img] = result_list
         self._show_image(img)
-        self.countLabel.setText("")
+        # self.countLabel.setText("")
         self.detect_circle_thread.wait()
         self.detect_circle_thread.quit()
         self.detect_circle_thread.wait()
@@ -199,12 +209,68 @@ class myMainWindow(ToolkitUi,QMainWindow):
             f1.write(f"{self.current_image_name}_dish.png,{bacteria_counts}\n")
             f1.close()
         result_img = cv2.imread(self.result_img)
-        self.countLabel.setText(f"{bacteria_counts}")
+        # self.countLabel.setText(f"{bacteria_counts}")
         self._show_image(result_img)
+        self.load_csv(self.result_csv)
 
         _force_move(self.dish_img_path, self.result_path)
         _force_move(self.result_img, self.output_images_path)
         shutil.rmtree(os.path.join(self.run_path,"exp"))
+    def load_csv(self,csv_path:str):
+        """
+        display csv file
+        """
+        try:
+            with open(csv_path, "r", newline="") as file:
+                csv_reader = csv.reader(file)
+                data = list(csv_reader)
+                num_rows = len(data)
+                num_columns = len(data[0]) if num_rows > 0 else 0
+                self.tableWidget.setRowCount(num_rows)
+                self.tableWidget.setColumnCount(num_columns)
+                for row, row_data in enumerate(data):
+                    for column, cell_data in enumerate(row_data):
+                        item = QTableWidgetItem(cell_data)
+                        self.tableWidget.setItem(row, column, item)
+
+        except Exception as e:
+            self.LOGGER.info(f"加载CSV文件出错: {str(e)}")
+    def update_table(self,data:str,type:int=0):
+        """
+        update table
+        :param data: data
+        :param type: int 0->insert,1->update
+        :return:
+        """
+
+    def column_selected(self):
+        for item in self.tableWidget.selectedItems():
+            selected_row = item.row()
+        try:
+            data1 = self.tableWidget.item(selected_row,0)
+            image_name = data1.text()
+            image_path = os.path.join(self.run_path,"images",image_name)
+            self.input_image = cv2.imread(image_path)
+            self._show_image(self.input_image)
+        except:
+            self.LOGGER.info(f"There are no selected column")
+    def resizeEvent(self, a0: QtGui.QResizeEvent) -> None:
+        try:
+            width = self.input_image.shape[1]
+            height = self.input_image.shape[0]
+            img_label_width = self.imageLabel.width()
+            img_label_height = self.imageLabel.height()
+            factor1 = img_label_width / width
+            factor2 = img_label_height / height
+            factor = min(factor1, factor2)
+            dis_width, dis_height = int(width * factor / 4) * 4, int(height * factor / 4) * 4
+            display = cv2.resize(self.input_image, (dis_width, dis_height))
+            img = cv2.cvtColor(display, cv2.COLOR_BGR2RGB)
+            self.display_image = QtGui.QImage(img.data, img.shape[1], img.shape[0], QtGui.QImage.Format_RGB888)
+            self.imageLabel.setPixmap(QtGui.QPixmap.fromImage(self.display_image))
+            QApplication.processEvents()
+        except:
+            pass
 
     def _show_image(self,input_image):
         """
@@ -212,7 +278,17 @@ class myMainWindow(ToolkitUi,QMainWindow):
         :param image: cv2 image
         :return:
         """
-        display = cv2.resize(input_image, (self.display_size.width(), self.display_size.height()))
+        width = input_image.shape[1]
+        height = input_image.shape[0]
+        # self.width_height_ratio = width / height
+        self.display_size = self.imageLabel.size()
+        img_label_width = self.imageLabel.width()
+        img_label_height = self.imageLabel.height()
+        factor1 = img_label_width/width
+        factor2 = img_label_height/height
+        factor = min(factor1,factor2)
+        dis_width,dis_height = int(width*factor/4)*4,int(height*factor/4)*4
+        display = cv2.resize(input_image, (dis_width, dis_height))
         img = cv2.cvtColor(display,cv2.COLOR_BGR2RGB)
         self.display_image = QtGui.QImage(img.data,img.shape[1],img.shape[0],QtGui.QImage.Format_RGB888)
         self.imageLabel.setPixmap(QtGui.QPixmap.fromImage(self.display_image))
