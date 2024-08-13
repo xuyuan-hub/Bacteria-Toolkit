@@ -1,0 +1,8 @@
+/dist/
+/build/
+/data/images/*
+/__pycache__/
+/.idea/
+/run/*
+/utils/*
+/weights/*
